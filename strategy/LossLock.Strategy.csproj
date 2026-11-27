@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>LossLock</AssemblyName>
+    <RootNamespace>LossLock</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\src\LossLockRules.cs" Link="LossLockRules.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(QuantowerBusinessLayer)' != ''">
+    <Reference Include="TradingPlatform.BusinessLayer">
+      <HintPath>$(QuantowerBusinessLayer)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="RequireQuantowerReference" BeforeTargets="ResolveAssemblyReferences">
+    <Error
+      Condition="'$(QuantowerBusinessLayer)' == ''"
+      Text="QuantowerBusinessLayer ist leer. Auf Windows build.ps1 ausführen, damit die Strategie gegen die installierte TradingPlatform.BusinessLayer.dll gebaut wird." />
+  </Target>
+</Project>
