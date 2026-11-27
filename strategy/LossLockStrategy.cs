@@ -133,11 +133,13 @@ namespace LossLock
 
             this.timer = new Timer(_ => this.Tick(), null, TickMilliseconds, TickMilliseconds);
             this.armed = true;
-            this.status = this.DescribeStatus(this.NowUtc());
 
             bool lockedNow;
             lock (this.gate)
+            {
                 lockedNow = LossLockRules.ShouldBeLocked(this.session.LockUntilUtc, this.session.HoldsLock, this.NowUtc());
+                this.status = this.CaptureSnapshot(this.NowUtc()).CompactStatus;
+            }
 
             if (lockedNow && this.UseAccountLock)
                 this.Lock(this.CurrentAccount);
@@ -168,21 +170,20 @@ namespace LossLock
         protected override List<StrategyMetric> OnGetMetrics()
         {
             List<StrategyMetric> result = base.OnGetMetrics();
-            string statusText;
-            string streak;
-            string until;
+            StatusSnapshot snapshot;
             string last;
             lock (this.gate)
             {
-                statusText = this.status;
-                streak = this.session.ConsecutiveLosses.ToString(CultureInfo.InvariantCulture);
-                until = this.session.HoldsLock ? this.FormatLocal(this.session.LockUntilUtc) : "-";
+                snapshot = this.CaptureSnapshot(this.NowUtc());
+                this.status = snapshot.CompactStatus;
                 last = this.lastRoundTrip;
             }
 
-            result.Add(new StrategyMetric { Name = "Status", FormattedValue = statusText });
-            result.Add(new StrategyMetric { Name = "Verlustserie", FormattedValue = streak });
-            result.Add(new StrategyMetric { Name = "Gesperrt bis", FormattedValue = until });
+            result.Add(new StrategyMetric { Name = "Status", FormattedValue = snapshot.CompactStatus });
+            result.Add(new StrategyMetric { Name = "Verlustserie", FormattedValue = snapshot.Streak });
+            result.Add(new StrategyMetric { Name = "Nächster Verlust", FormattedValue = snapshot.NextLoss });
+            result.Add(new StrategyMetric { Name = "Restzeit", FormattedValue = snapshot.Remaining });
+            result.Add(new StrategyMetric { Name = "Gesperrt bis", FormattedValue = snapshot.Until });
             result.Add(new StrategyMetric { Name = "Letzter Abschluss", FormattedValue = last });
             return result;
         }
@@ -459,7 +460,7 @@ namespace LossLock
                     else if (dropProvisional)
                         this.provisionalHeld = false;
 
-                    this.status = this.DescribeStatus(now);
+                    this.status = this.CaptureSnapshot(now).CompactStatus;
                 }
 
                 if (doUnlock || dropProvisional)
@@ -632,13 +633,17 @@ namespace LossLock
                 this.ResetStreakEachLocalDay);
         }
 
-        private string DescribeStatus(DateTime nowUtc)
+        private StatusSnapshot CaptureSnapshot(DateTime nowUtc)
         {
-            if (LossLockRules.ShouldBeLocked(this.session.LockUntilUtc, this.session.HoldsLock, nowUtc))
-                return "Gesperrt bis " + this.FormatLocal(this.session.LockUntilUtc);
-            if (this.HasProtectivePending())
-                return "Sperre wird geprüft";
-            return "Aktiv";
+            string untilLocal = this.session.LockUntilUtc.HasValue
+                ? this.FormatLocal(this.session.LockUntilUtc)
+                : "";
+            return LossLockRules.Describe(
+                this.session,
+                this.SettingsFromInputs(),
+                nowUtc,
+                this.HasProtectivePending(),
+                untilLocal);
         }
 
         private DateTime NowUtc()
