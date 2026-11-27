@@ -14,13 +14,15 @@ Die Serie wird an einem neuen lokalen Kalendertag zurückgesetzt. Eine Sperre, d
 
 ## Installation
 
-Quantower schließen. In PowerShell, im Ordner dieses Projekts:
+Quantower schließen. Quantower 1.146 und 1.147 laufen auf .NET 10. Dafür reicht das .NET 8 SDK nicht. Auf dem Rechner muss ein .NET 10 SDK liegen (`dotnet --list-sdks`). Das .NET 10 Desktop Runtime, das Quantower selbst verlangt, ersetzt das SDK nicht.
+
+In PowerShell, im Ordner dieses Projekts:
 
 ```powershell
 .\build.ps1 -QuantowerRoot C:\Quantower
 ```
 
-Das Skript sucht `TradingPlatform\v*\bin\TradingPlatform.BusinessLayer.dll`, baut `LossLock.dll` und kopiert sie nach `Settings\Scripts\Strategies\LossLock\`.
+Das Skript sucht `TradingPlatform\v*\bin\TradingPlatform.BusinessLayer.dll`, liest dessen .NET-Version, baut `LossLock.dll` dagegen und kopiert sie nach `Settings\Scripts\Strategies\LossLock\`. Gegen 1.147.2 ist das Ziel `net10.0-windows`.
 
 Quantower starten.
 

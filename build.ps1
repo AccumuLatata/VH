@@ -25,10 +25,50 @@ if (-not (Test-Path $dll)) {
     throw "TradingPlatform.BusinessLayer.dll fehlt: $dll"
 }
 
+function Get-StrategyTargetFramework([string]$root) {
+    $candidates = @(
+        (Join-Path $root "TradingPlatform.runtimeconfig.json"),
+        (Join-Path $root "bin\TradingPlatform.runtimeconfig.json")
+    )
+    $found = Get-ChildItem -LiteralPath $root -Filter *.runtimeconfig.json -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 12
+    foreach ($item in $found) {
+        $candidates += $item.FullName
+    }
+
+    foreach ($path in $candidates) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+
+        try {
+            $json = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            $tfm = $json.runtimeOptions.tfm
+            if ([string]::IsNullOrWhiteSpace($tfm)) {
+                continue
+            }
+
+            if ($tfm -notlike "*-windows") {
+                $tfm = "$tfm-windows"
+            }
+
+            return $tfm
+        }
+        catch {
+        }
+    }
+
+    return "net10.0-windows"
+}
+
+$tfm = Get-StrategyTargetFramework $versionDir.FullName
+Write-Host "Quantower $($versionDir.Name), Ziel $tfm"
+Write-Host $dll
+
 $project = Join-Path $PSScriptRoot "strategy\LossLock.Strategy.csproj"
-dotnet build $project -c Release -p:QuantowerBusinessLayer="$dll"
+dotnet build $project -c Release -p:QuantowerBusinessLayer="$dll" -p:TargetFramework="$tfm"
 if ($LASTEXITCODE -ne 0) {
-    throw "Build fehlgeschlagen"
+    throw "Build fehlgeschlagen. Quantower $($versionDir.Name) braucht dasselbe .NET wie die Strategie (heute .NET 10 Desktop). SDK: dotnet --list-sdks"
 }
 
 $built = Join-Path $PSScriptRoot "strategy\bin\Release\LossLock.dll"
