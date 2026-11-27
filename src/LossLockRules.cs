@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace LossLock
 {
@@ -29,6 +30,23 @@ namespace LossLock
         int LongLockMinutes,
         double MinimumLoss,
         bool ResetStreakEachLocalDay);
+
+    /// <summary>
+    /// Display strings for one moment. The strategy and the status window both
+    /// render this, so the countdown cannot drift between the two.
+    /// </summary>
+    public readonly record struct StatusSnapshot(
+        string CompactStatus,
+        string State,
+        string Streak,
+        string NextLoss,
+        string Remaining,
+        string Until,
+        string Hero,
+        string Detail,
+        string SeriesLine,
+        bool Locked,
+        bool Pending);
 
     /// <summary>
     /// Pure rules for the loss lock. No Quantower types, so the streak and
@@ -123,12 +141,8 @@ namespace LossLock
             }
 
             int streak = consecutiveLosses + 1;
-            int trip = settings.LossesForLongLock < 1 ? 1 : settings.LossesForLongLock;
-            int minutes = streak >= trip ? settings.LongLockMinutes : settings.LossLockMinutes;
-            if (minutes < 0)
-                minutes = 0;
-            if (minutes > MaxLockMinutes)
-                minutes = MaxLockMinutes;
+            int trip = TripCount(settings);
+            int minutes = ClampMinutes(streak >= trip ? settings.LongLockMinutes : settings.LossLockMinutes);
 
             if (minutes == 0)
             {
@@ -161,6 +175,132 @@ namespace LossLock
         public static bool ShouldRelease(DateTime? lockUntilUtc, bool holdsLock, DateTime nowUtc)
         {
             return holdsLock && lockUntilUtc.HasValue && nowUtc >= lockUntilUtc.Value;
+        }
+
+        /// <summary>
+        /// untilLocal is the already formatted clock time of the lock end.
+        /// Empty when there is no end. The rules stay free of time zones.
+        /// </summary>
+        public static StatusSnapshot Describe(
+            SessionState state,
+            LockSettings settings,
+            DateTime nowUtc,
+            bool pendingConfirmation,
+            string untilLocal)
+        {
+            int trip = TripCount(settings);
+            int streak = state.ConsecutiveLosses < 0 ? 0 : state.ConsecutiveLosses;
+            string streakText = streak.ToString(CultureInfo.InvariantCulture)
+                + " von "
+                + trip.ToString(CultureInfo.InvariantCulture);
+            bool locked = ShouldBeLocked(state.LockUntilUtc, state.HoldsLock, nowUtc);
+            string next = NextLossSentence(streak, settings);
+
+            if (locked)
+            {
+                string remaining = FormatRemaining(state.LockUntilUtc.Value - nowUtc);
+                string until = string.IsNullOrEmpty(untilLocal) ? "-" : untilLocal;
+                return new StatusSnapshot(
+                    "Gesperrt, noch " + remaining,
+                    "Gesperrt",
+                    streakText,
+                    "-",
+                    remaining,
+                    until,
+                    remaining,
+                    "bis " + until,
+                    "Serie " + streakText,
+                    true,
+                    pendingConfirmation);
+            }
+
+            if (pendingConfirmation)
+            {
+                return new StatusSnapshot(
+                    "Sperre wird geprüft",
+                    "Sperre wird geprüft",
+                    streakText,
+                    "-",
+                    "-",
+                    "-",
+                    streakText,
+                    "Der Abschluss wird bestätigt.",
+                    "",
+                    false,
+                    true);
+            }
+
+            return new StatusSnapshot(
+                "Aktiv",
+                "Aktiv",
+                streakText,
+                next,
+                "-",
+                "-",
+                streakText,
+                next,
+                "",
+                false,
+                false);
+        }
+
+        public static string FormatRemaining(TimeSpan remaining)
+        {
+            if (remaining.TotalSeconds <= 0)
+                return "00:00";
+
+            int total = (int)Math.Ceiling(remaining.TotalSeconds - 1e-9);
+            if (total < 1)
+                total = 1;
+
+            int hours = total / 3600;
+            int minutes = (total % 3600) / 60;
+            int seconds = total % 60;
+            if (hours > 0)
+            {
+                return hours.ToString(CultureInfo.InvariantCulture)
+                    + ":"
+                    + minutes.ToString("00", CultureInfo.InvariantCulture)
+                    + ":"
+                    + seconds.ToString("00", CultureInfo.InvariantCulture);
+            }
+
+            return minutes.ToString("00", CultureInfo.InvariantCulture)
+                + ":"
+                + seconds.ToString("00", CultureInfo.InvariantCulture);
+        }
+
+        public static string NextLossSentence(int consecutiveLosses, LockSettings settings)
+        {
+            int streak = consecutiveLosses < 0 ? 0 : consecutiveLosses;
+            int minutes = streak + 1 >= TripCount(settings)
+                ? settings.LongLockMinutes
+                : settings.LossLockMinutes;
+            minutes = ClampMinutes(minutes);
+            if (minutes == 0)
+                return "Der nächste Verlust sperrt nicht.";
+            return "Der nächste Verlust sperrt " + MinutesLabel(minutes) + ".";
+        }
+
+        public static string MinutesLabel(int minutes)
+        {
+            if (minutes == 1)
+                return "1 Minute";
+            return minutes.ToString(CultureInfo.InvariantCulture) + " Minuten";
+        }
+
+        private static int TripCount(LockSettings settings)
+        {
+            return settings.LossesForLongLock < 1 ? 1 : settings.LossesForLongLock;
+        }
+
+        private static int ClampMinutes(int minutes)
+        {
+            if (minutes < 0)
+                return 0;
+            if (minutes > MaxLockMinutes)
+                return MaxLockMinutes;
+            return minutes;
         }
 
         private static bool IsFinite(double? value)

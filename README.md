@@ -34,6 +34,19 @@ Nur eine Instanz pro Konto. Zwei Instanzen zählen denselben Abschluss doppelt.
 
 Der Zustand liegt unter `%LocalAppData%\LossLock\`. Dort stehen Serie und Sperr-Ende, damit ein Neustart von Quantower die laufende Frist fortsetzt.
 
+## Kennzahlen
+
+Im Strategies Manager, in der Zeile der laufenden Strategie:
+
+- **Status:** Aktiv, Sperre wird geprüft, oder Gesperrt mit der Restzeit.
+- **Verlustserie:** zum Beispiel 2 von 3.
+- **Nächster Verlust:** welche Sperre der nächste Verlust auslöst. Während einer Sperre steht dort ein Strich.
+- **Restzeit:** Minuten und Sekunden bis zum Ende, auf die nächste Sekunde aufgerundet. Sonst ein Strich.
+- **Gesperrt bis:** die lokale Uhrzeit des Endes.
+- **Letzter Abschluss:** das letzte Ergebnis.
+
+Dieselben Sätze erzeugt `LossLockRules.Describe`. Die Kennzahlen lesen nur diese Texte. Die Restzeit ist neu, wenn Quantower die Zeile abfragt.
+
 ## Vor dem Live-Konto prüfen
 
 Zuerst auf einem Sim-Konto, mit kurzen Fristen. Die Minuten lassen sich nur ändern, bevor die Strategie läuft. Also stoppen, auf 1 und 2 Minuten stellen, starten, danach wieder auf 5 und 30 stellen.

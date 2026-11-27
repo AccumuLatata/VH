@@ -22,6 +22,10 @@ internal static class Program
         DisabledSingleLossStillCountsTowardThree();
         ZeroLongLockDoesNotStartALock();
         ReleaseAndHold();
+        FormatRemainingTimes();
+        StatusWhileActive();
+        StatusWhileLocked();
+        StatusWhilePending();
         if (failed > 0)
         {
             Console.Error.WriteLine(failed.ToString(CultureInfo.InvariantCulture) + " failed");
@@ -175,6 +179,120 @@ internal static class Program
         (state, _) = LossLockRules.OnRoundTrip(state, RoundTripOutcome.Loss, Utc(8, 0), "2026-11-27", settings);
         Equal(3, state.ConsecutiveLosses);
         Check(!state.HoldsLock, "no duration means no lock");
+    }
+
+    private static void FormatRemainingTimes()
+    {
+        Equal("30:00", LossLockRules.FormatRemaining(TimeSpan.FromMinutes(30)));
+        Equal("00:01", LossLockRules.FormatRemaining(TimeSpan.FromSeconds(1)));
+        Equal("00:01", LossLockRules.FormatRemaining(TimeSpan.FromSeconds(0.2)));
+        Equal("00:00", LossLockRules.FormatRemaining(TimeSpan.Zero));
+        Equal("00:00", LossLockRules.FormatRemaining(TimeSpan.FromSeconds(-3)));
+        Equal("01:00", LossLockRules.FormatRemaining(TimeSpan.FromSeconds(59.1)));
+        Equal("1:30:01", LossLockRules.FormatRemaining(TimeSpan.FromMinutes(90) + TimeSpan.FromSeconds(1)));
+    }
+
+    private static void StatusWhileActive()
+    {
+        DateTime now = Utc(10, 0);
+        StatusSnapshot fresh = LossLockRules.Describe(Empty(), Defaults(), now, false, "");
+        Equal("Aktiv", fresh.State);
+        Equal("Aktiv", fresh.CompactStatus);
+        Equal("0 von 3", fresh.Streak);
+        Equal("0 von 3", fresh.Hero);
+        Equal("Der nächste Verlust sperrt 5 Minuten.", fresh.NextLoss);
+        Equal("Der nächste Verlust sperrt 5 Minuten.", fresh.Detail);
+        Equal("-", fresh.Remaining);
+        Equal("-", fresh.Until);
+        Equal("", fresh.SeriesLine);
+        Check(!fresh.Locked, "fresh is not locked");
+
+        StatusSnapshot two = LossLockRules.Describe(
+            new SessionState(2, null, false, "2026-11-27"), Defaults(), now, false, "");
+        Equal("2 von 3", two.Streak);
+        Equal("Der nächste Verlust sperrt 30 Minuten.", two.NextLoss);
+
+        StatusSnapshot noShort = LossLockRules.Describe(
+            Empty(), new LockSettings(0, 3, 30, 0, true), now, false, "");
+        Equal("Der nächste Verlust sperrt nicht.", noShort.NextLoss);
+
+        StatusSnapshot noLong = LossLockRules.Describe(
+            new SessionState(2, null, false, "2026-11-27"), new LockSettings(5, 3, 0, 0, true), now, false, "");
+        Equal("Der nächste Verlust sperrt nicht.", noLong.NextLoss);
+
+        StatusSnapshot oneMinute = LossLockRules.Describe(
+            Empty(), new LockSettings(1, 3, 30, 0, true), now, false, "");
+        Equal("Der nächste Verlust sperrt 1 Minute.", oneMinute.NextLoss);
+
+        StatusSnapshot everyLossIsLong = LossLockRules.Describe(
+            Empty(), new LockSettings(5, 1, 30, 0, true), now, false, "");
+        Equal("0 von 1", everyLossIsLong.Streak);
+        Equal("Der nächste Verlust sperrt 30 Minuten.", everyLossIsLong.NextLoss);
+
+        StatusSnapshot negative = LossLockRules.Describe(
+            new SessionState(-4, null, false, "2026-11-27"), Defaults(), now, false, "");
+        Equal("0 von 3", negative.Streak);
+
+        StatusSnapshot clamped = LossLockRules.Describe(
+            new SessionState(2, null, false, "2026-11-27"),
+            new LockSettings(5, 3, LossLockRules.MaxLockMinutes + 50, 0, true),
+            now,
+            false,
+            "");
+        Equal("Der nächste Verlust sperrt " + LossLockRules.MaxLockMinutes.ToString(CultureInfo.InvariantCulture) + " Minuten.", clamped.NextLoss);
+
+        StatusSnapshot expired = LossLockRules.Describe(
+            new SessionState(2, now, true, "2026-11-27"), Defaults(), now, false, "11:00:00");
+        Equal("Aktiv", expired.State);
+        Check(!expired.Locked, "a lock that has reached its end is not shown as locked");
+        Equal("Der nächste Verlust sperrt 30 Minuten.", expired.Detail);
+    }
+
+    private static void StatusWhileLocked()
+    {
+        DateTime now = Utc(10, 0);
+        DateTime until = now.AddMinutes(4).AddSeconds(12).AddMilliseconds(400);
+        StatusSnapshot snap = LossLockRules.Describe(
+            new SessionState(2, until, true, "2026-11-27"), Defaults(), now, false, "14:04:12");
+        Equal("Gesperrt", snap.State);
+        Equal("04:13", snap.Remaining);
+        Equal("Gesperrt, noch 04:13", snap.CompactStatus);
+        Equal("04:13", snap.Hero);
+        Equal("bis 14:04:12", snap.Detail);
+        Equal("14:04:12", snap.Until);
+        Equal("Serie 2 von 3", snap.SeriesLine);
+        Equal("-", snap.NextLoss);
+        Equal("2 von 3", snap.Streak);
+        Check(snap.Locked, "locked");
+
+        StatusSnapshot exact = LossLockRules.Describe(
+            new SessionState(1, now.AddMinutes(5), true, "2026-11-27"), Defaults(), now, false, "11:05:00");
+        Equal("05:00", exact.Remaining);
+        Equal("bis 11:05:00", exact.Detail);
+    }
+
+    private static void StatusWhilePending()
+    {
+        DateTime now = Utc(10, 0);
+        StatusSnapshot pending = LossLockRules.Describe(
+            new SessionState(1, null, false, "2026-11-27"), Defaults(), now, true, "");
+        Equal("Sperre wird geprüft", pending.State);
+        Equal("Sperre wird geprüft", pending.CompactStatus);
+        Equal("1 von 3", pending.Hero);
+        Equal("Der Abschluss wird bestätigt.", pending.Detail);
+        Equal("", pending.SeriesLine);
+        Equal("-", pending.Remaining);
+        Equal("-", pending.NextLoss);
+        Check(pending.Pending, "pending");
+        Check(!pending.Locked, "pending is not a finished lock");
+
+        StatusSnapshot both = LossLockRules.Describe(
+            new SessionState(1, now.AddMinutes(5), true, "2026-11-27"), Defaults(), now, true, "11:05:00");
+        Check(both.Locked, "an existing lock stays on screen while a new close is confirmed");
+        Equal("Gesperrt", both.State);
+        Equal("05:00", both.Remaining);
+        Equal("bis 11:05:00", both.Detail);
+        Check(both.Pending, "pending flag is kept for the caller");
     }
 
     private static void ReleaseAndHold()
