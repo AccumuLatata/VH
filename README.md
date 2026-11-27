@@ -45,7 +45,15 @@ Im Strategies Manager, in der Zeile der laufenden Strategie:
 - **Gesperrt bis:** die lokale Uhrzeit des Endes.
 - **Letzter Abschluss:** das letzte Ergebnis.
 
-Dieselben Sätze erzeugt `LossLockRules.Describe`. Die Kennzahlen lesen nur diese Texte. Die Restzeit ist neu, wenn Quantower die Zeile abfragt.
+Dieselben Sätze erzeugt `LossLockRules.Describe`. Die Kennzahlen und das Statusfenster lesen nur diese Texte. Die Restzeit ist neu, wenn Quantower die Zeile abfragt oder das Fenster sich aktualisiert.
+
+## Statusfenster
+
+Sobald die Strategie läuft, öffnet sich ein kleines Fenster. Es zeigt das Konto, den Zustand, die Serie, die Restzeit, das Ende und den letzten Abschluss. Es bleibt vor anderen Fenstern und lässt sich verschieben. Beim Aktualisieren nimmt es nicht den Fokus, damit eine Order im DOM nicht unterbrochen wird.
+
+Das Fenster hat keine Schalter. Die Minuten bleiben die aus dem Strategie-Dialog vor dem Start. Schließen beendet die Strategie nicht und hebt die Sperre nicht auf. Die Kennzahlen gelten weiter. Beim nächsten Start ist das Fenster wieder da, an der letzten Stelle, sofern die noch auf einem Bildschirm liegt. Die Stelle steht in `%LocalAppData%\LossLock\window.location`.
+
+Wenn das Fenster nicht aufgeht, steht der Grund im Log. Die Sperre arbeitet trotzdem.
 
 ## Vor dem Live-Konto prüfen
 

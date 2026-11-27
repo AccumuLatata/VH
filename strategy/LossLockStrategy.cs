@@ -68,6 +68,8 @@ namespace LossLock
         private string status = "Startet";
         private string lastRoundTrip = "-";
         private string statePath;
+        private StatusWindow statusWindow;
+        private bool statusWindowClosedLogged;
 
         public LossLockStrategy()
         {
@@ -153,6 +155,8 @@ namespace LossLock
 
             if (lockedNow)
                 this.Log("Eine Sperre aus der letzten Sitzung läuft noch bis " + this.FormatLocal(this.session.LockUntilUtc) + ".", StrategyLoggingLevel.Trading);
+
+            this.OpenStatusWindow();
         }
 
         protected override void OnStop()
@@ -190,6 +194,8 @@ namespace LossLock
 
         private void Disarm(bool keepLock)
         {
+            this.CloseStatusWindow();
+
             bool wasArmed;
             DateTime? until;
             lock (this.gate)
@@ -418,6 +424,9 @@ namespace LossLock
                 bool dropProvisional = false;
                 Account account = this.CurrentAccount;
                 DateTime now = this.NowUtc();
+                StatusSnapshot snapshot = default(StatusSnapshot);
+                string roundTrip = null;
+                bool showWindow = false;
 
                 lock (this.gate)
                 {
@@ -460,7 +469,10 @@ namespace LossLock
                     else if (dropProvisional)
                         this.provisionalHeld = false;
 
-                    this.status = this.CaptureSnapshot(now).CompactStatus;
+                    snapshot = this.CaptureSnapshot(now);
+                    this.status = snapshot.CompactStatus;
+                    roundTrip = this.lastRoundTrip;
+                    showWindow = true;
                 }
 
                 if (doUnlock || dropProvisional)
@@ -484,6 +496,9 @@ namespace LossLock
                     this.Log(alert, StrategyLoggingLevel.Trading);
                     Core.Instance.Alert(alert, "", account != null ? account.ConnectionId : "");
                 }
+
+                if (showWindow)
+                    this.PublishStatusWindow(snapshot, roundTrip);
             }
             catch (Exception exception)
             {
@@ -631,6 +646,139 @@ namespace LossLock
                 this.LongLockMinutes,
                 this.MinimumLoss,
                 this.ResetStreakEachLocalDay);
+        }
+
+        private void OpenStatusWindow()
+        {
+            StatusWindow opened = null;
+            try
+            {
+                string error;
+                opened = StatusWindow.TryOpen(out error);
+                if (opened == null)
+                {
+                    this.Log(
+                        "Statusfenster nicht geöffnet. " + (string.IsNullOrEmpty(error) ? "" : error + " ")
+                        + "Die Kennzahlen im Strategies Manager bleiben gültig.",
+                        StrategyLoggingLevel.Error);
+                    return;
+                }
+
+                bool keep;
+                StatusSnapshot snapshot;
+                string roundTrip;
+                lock (this.gate)
+                {
+                    keep = this.armed;
+                    if (keep)
+                    {
+                        this.statusWindow = opened;
+                        this.statusWindowClosedLogged = false;
+                    }
+
+                    snapshot = this.CaptureSnapshot(this.NowUtc());
+                    roundTrip = this.lastRoundTrip;
+                }
+
+                if (!keep)
+                {
+                    opened.Dispose();
+                    opened = null;
+                    return;
+                }
+
+                string account = this.CurrentAccount != null ? this.CurrentAccount.Name : "";
+                opened.Publish(snapshot, account, roundTrip);
+                opened = null;
+            }
+            catch (Exception exception)
+            {
+                if (opened != null)
+                {
+                    lock (this.gate)
+                    {
+                        if (object.ReferenceEquals(this.statusWindow, opened))
+                            this.statusWindow = null;
+                    }
+
+                    try
+                    {
+                        opened.Dispose();
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+
+                this.Log("Statusfenster nicht geöffnet. " + exception.Message, StrategyLoggingLevel.Error);
+            }
+        }
+
+        private void PublishStatusWindow(StatusSnapshot snapshot, string roundTrip)
+        {
+            try
+            {
+                StatusWindow current;
+                lock (this.gate)
+                    current = this.statusWindow;
+
+                if (current == null)
+                    return;
+
+                if (!current.IsOpen)
+                {
+                    bool tellUser = false;
+                    lock (this.gate)
+                    {
+                        if (object.ReferenceEquals(this.statusWindow, current))
+                            this.statusWindow = null;
+                        if (!this.statusWindowClosedLogged)
+                        {
+                            this.statusWindowClosedLogged = true;
+                            tellUser = true;
+                        }
+                    }
+
+                    if (tellUser)
+                    {
+                        this.Log(
+                            "Statusfenster geschlossen. Die Strategie läuft weiter und hält die Sperre.",
+                            StrategyLoggingLevel.Info);
+                    }
+
+                    return;
+                }
+
+                string account = this.CurrentAccount != null ? this.CurrentAccount.Name : "";
+                current.Publish(snapshot, account, roundTrip);
+            }
+            catch (Exception exception)
+            {
+                this.Log("Statusfenster: " + exception.Message, StrategyLoggingLevel.Error);
+            }
+        }
+
+        private void CloseStatusWindow()
+        {
+            StatusWindow current;
+            lock (this.gate)
+            {
+                current = this.statusWindow;
+                this.statusWindow = null;
+                this.statusWindowClosedLogged = true;
+            }
+
+            if (current == null)
+                return;
+
+            try
+            {
+                current.Dispose();
+            }
+            catch (Exception exception)
+            {
+                this.Log("Statusfenster: " + exception.Message, StrategyLoggingLevel.Error);
+            }
         }
 
         private StatusSnapshot CaptureSnapshot(DateTime nowUtc)
